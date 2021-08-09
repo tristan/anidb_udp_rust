@@ -1,0 +1,22 @@
+[package]
+name = "anidb"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+tokio = { version = "1", features = ["net", "sync", "rt", "time"] }
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_with = "1"
+serde_urlencoded = "0.7"
+typed-builder = "0.9"
+bytes = "1"
+async-trait = "0.1"
+hex = "0.4"
+
+md4 = { version = "0.9", optional = true }
+crcx = { version = "2", optional = true, package = "crc" }
+
+[features]
+ed2k = ["md4"]
+crc = ["crcx"]
