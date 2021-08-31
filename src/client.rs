@@ -96,68 +96,6 @@ impl<C> AniDbClient<C> where C: AniDbCache {
         }
         let request_map: Arc<Mutex<HashMap<String, oneshot::Sender<(String, String, String)>>>>
             = Arc::new(Mutex::new(HashMap::new()));
-        {
-            let socket = socket.clone();
-            let request_map = request_map.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 2048];
-                let mut offset = 0;
-                loop {
-                    match socket.recv(&mut buf[offset..]).await {
-                        Ok(len) => {
-                            let buf_len = offset + len;
-                            if !buf[..buf_len].ends_with(b"\n") {
-                                // we expect more bytes?
-                                eprintln!(
-                                    "expecting more bytes after: {}",
-                                    match std::str::from_utf8(&buf[..buf_len]) {
-                                        Ok(s) => s,
-                                        Err(_e) => "failed to decode as utf8"
-                                    }
-                                );
-                                offset = buf_len;
-                                continue;
-                            }
-                            println!("anidb received {} bytes", len);
-                            match std::str::from_utf8(&buf[..buf_len]) {
-                                Ok(data) => {
-                                    let mut data_iter = data.splitn(2, " ");
-                                    let tag = expect_next!(data_iter, offset);
-                                    // TODO: now we have tag, we can potentially reply
-                                    let data = expect_next!(data_iter, offset);
-                                    let mut data_iter = data.splitn(2, " ");
-                                    let code = expect_next!(data_iter, offset).to_string();
-                                    let data = expect_next!(data_iter, offset);
-                                    let mut data_iter = data.splitn(2, "\n");
-                                    let reply = expect_next!(data_iter, offset).to_string();
-                                    let data = expect_next!(data_iter, offset).to_string();
-                                    let request_sender = {
-                                        request_map.lock().unwrap()
-                                            .remove(tag)
-                                    };
-                                    if let Some(request_sender) = request_sender {
-                                        match request_sender.send((code, reply, data)) {
-                                            Ok(_) => (),
-                                            Err(e) => {
-                                                eprintln!("failed to respond to request `{}`: {:?}", tag, e);
-                                            }
-                                        }
-                                    }
-                                    offset = 0;
-                                },
-                                Err(_e) => {
-                                    eprintln!("failed to decode buffer as utf8");
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            dbg!(e);
-                            break;
-                        }
-                    }
-                }
-            });
-        }
 
         Ok(AniDbClient {
             socket,
@@ -173,12 +111,77 @@ impl<C> AniDbClient<C> where C: AniDbCache {
         })
     }
 
+    fn start_receiver(&self) {
+        let socket = self.socket.clone();
+        let request_map = self.request_map.clone();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 2048];
+            let mut offset = 0;
+            loop {
+                match socket.recv(&mut buf[offset..]).await {
+                    Ok(len) => {
+                        let buf_len = offset + len;
+                        if !buf[..buf_len].ends_with(b"\n") {
+                            // we expect more bytes?
+                            eprintln!(
+                                "expecting more bytes after: {}",
+                                match std::str::from_utf8(&buf[..buf_len]) {
+                                    Ok(s) => s,
+                                    Err(_e) => "failed to decode as utf8"
+                                }
+                            );
+                            offset = buf_len;
+                            continue;
+                        }
+                        println!("anidb received {} bytes", len);
+                        match std::str::from_utf8(&buf[..buf_len]) {
+                            Ok(data) => {
+                                let mut data_iter = data.splitn(2, " ");
+                                let tag = expect_next!(data_iter, offset);
+                                // TODO: now we have tag, we can potentially reply
+                                let data = expect_next!(data_iter, offset);
+                                let mut data_iter = data.splitn(2, " ");
+                                let code = expect_next!(data_iter, offset).to_string();
+                                let data = expect_next!(data_iter, offset);
+                                let mut data_iter = data.splitn(2, "\n");
+                                let reply = expect_next!(data_iter, offset).to_string();
+                                let data = expect_next!(data_iter, offset).to_string();
+                                let request_sender = {
+                                    request_map.lock().unwrap()
+                                        .remove(tag)
+                                };
+                                if let Some(request_sender) = request_sender {
+                                    match request_sender.send((code, reply, data)) {
+                                        Ok(_) => (),
+                                        Err(e) => {
+                                            eprintln!("failed to respond to request `{}`: {:?}", tag, e);
+                                        }
+                                    }
+                                }
+                                offset = 0;
+                            },
+                            Err(_e) => {
+                                eprintln!("failed to decode buffer as utf8");
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        dbg!(e);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     async fn connect(
         &self,
     ) -> Result<String, AniDbError> {
         println!("connecting to socket");
         self.socket.connect(ANIDB_ADDR).await?;
         println!("connected to socket");
+        self.start_receiver();
+        println!("started receiver");
         let auth = AuthRequest::builder()
             .user(self.username.clone())
             .pass(self.password.clone())
