@@ -97,7 +97,11 @@ impl<C> AniDbClient<C> where C: AniDbCache {
         let request_map: Arc<Mutex<HashMap<String, oneshot::Sender<(String, String, String)>>>>
             = Arc::new(Mutex::new(HashMap::new()));
 
-        Ok(AniDbClient {
+        println!("connecting to socket");
+        socket.connect(ANIDB_ADDR).await?;
+        println!("connected to socket");
+
+        let client = AniDbClient {
             socket,
             cache,
             username: user.to_owned(),
@@ -108,7 +112,9 @@ impl<C> AniDbClient<C> where C: AniDbCache {
             client_name: client_id.to_owned(),
             client_version,
             session_id: Arc::new(TokioMutex::new(None)),
-        })
+        };
+        client.start_receiver();
+        Ok(client)
     }
 
     fn start_receiver(&self) {
@@ -177,11 +183,6 @@ impl<C> AniDbClient<C> where C: AniDbCache {
     async fn connect(
         &self,
     ) -> Result<String, AniDbError> {
-        println!("connecting to socket");
-        self.socket.connect(ANIDB_ADDR).await?;
-        println!("connected to socket");
-        self.start_receiver();
-        println!("started receiver");
         let auth = AuthRequest::builder()
             .user(self.username.clone())
             .pass(self.password.clone())
