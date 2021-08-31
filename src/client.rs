@@ -86,6 +86,7 @@ impl<C> AniDbClient<C> where C: AniDbCache {
                         }
                     }
                     // rate limit sending (TODO: make optional?)
+                    println!("anidb sent {} bytes", data.len());
                     packet_count += 1;
                     if packet_count > 5 {
                         sleep(Duration::from_secs(2)).await;
@@ -117,6 +118,7 @@ impl<C> AniDbClient<C> where C: AniDbCache {
                                 offset = buf_len;
                                 continue;
                             }
+                            println!("anidb received {} bytes");
                             match std::str::from_utf8(&buf[..buf_len]) {
                                 Ok(data) => {
                                     let mut data_iter = data.splitn(2, " ");
@@ -230,13 +232,15 @@ impl<C> AniDbClient<C> where C: AniDbCache {
     {
         let args: String = request.encode()?;
         if let Some((code, resp_str, data)) = {
+            println!("Locking anidb cache");
             let cache = self.cache.lock().await;
             cache.get(R::name(), &args).await
                 .map_err(|e| AniDbError::CacheError(format!("{}", e)))?
         } {
-            dbg!("FROM CACHE!");
+            println!("lock released");
             request.decode_response(&code, &resp_str, &data)
         } else {
+            println!("lock released");
             let (tag, req_str) = if R::requires_login() {
                 let session_id = self.get_session_id_or_connect().await?;
                 let tag = self.next_tag();
@@ -253,18 +257,23 @@ impl<C> AniDbClient<C> where C: AniDbCache {
             };
             let (sender, receiver) = oneshot::channel();
             {
+                println!("Locking anidb request map");
                 let mut map = self.request_map.lock().unwrap();
                 map.insert(tag, sender);
             }
+            println!("unlocked anidb request map ... sending request");
             self.request_queue.send(req_str).await?;
+            println!("waiting for reply");
             let (code, reply, data) = receiver.await?;
             {
+                println!("Locking anidb cache 2");
                 let cache = self.cache.lock().await;
                 cache.store(
                     R::name(), &args, &code, &reply, &data
                 ).await
                     .map_err(|e| AniDbError::CacheError(format!("{}", e)))?
             }
+            println!("decoding response");
             let resp = request.decode_response(&code, &reply, &data)?;
             Ok(resp)
         }
