@@ -176,14 +176,18 @@ impl<C> AniDbClient<C> where C: AniDbCache {
     async fn connect(
         &self,
     ) -> Result<String, AniDbError> {
+        println!("connecting to socket");
         self.socket.connect(ANIDB_ADDR).await?;
+        println!("connected to socket");
         let auth = AuthRequest::builder()
             .user(self.username.clone())
             .pass(self.password.clone())
             .client(self.client_name.clone())
             .clientver(self.client_version)
             .build();
+        println!("getting tag");
         let tag = self.next_tag();
+        println!("got tag");
         let req_str = format!(
             "{} {}&tag={}",
             AuthRequest::name(),
@@ -192,12 +196,17 @@ impl<C> AniDbClient<C> where C: AniDbCache {
         );
         let (sender, receiver) = oneshot::channel();
         {
+            println!("locking request map");
             let mut map = self.request_map.lock().unwrap();
             map.insert(tag, sender);
         }
+        println!("sending connect request");
         self.request_queue.send(req_str).await?;
+        println!("waiting for connect response");
         let (code, resp_str, data) = receiver.await?;
+        println!("decoding connect response");
         let resp = auth.decode_response(&code, &resp_str, &data)?;
+        println!("done connecting");
         Ok(resp.session_id)
     }
 
@@ -213,10 +222,12 @@ impl<C> AniDbClient<C> where C: AniDbCache {
     }
 
     async fn get_session_id_or_connect(&self) -> Result<String, AniDbError> {
+        println!("locking session id");
         let mut sid = self.session_id.lock().await;
         match sid.as_ref() {
             Some(session_id) => Ok(session_id.clone()),
             None => {
+                println!("calling connect");
                 let session_id = self.connect().await?;
                 *sid = Some(session_id.clone());
                 Ok(session_id)
@@ -242,8 +253,11 @@ impl<C> AniDbClient<C> where C: AniDbCache {
         } else {
             println!("lock released");
             let (tag, req_str) = if R::requires_login() {
+                println!("getting session id");
                 let session_id = self.get_session_id_or_connect().await?;
+                println!("got session id ... getting tag");
                 let tag = self.next_tag();
+                println!("got tag");
                 (tag.clone(), format!(
                     "{} {}&tag={}&s={}",
                     R::name(), args, tag, session_id
