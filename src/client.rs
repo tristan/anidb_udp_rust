@@ -118,7 +118,7 @@ impl<C> AniDbClient<C> where C: AniDbCache {
                                 offset = buf_len;
                                 continue;
                             }
-                            println!("anidb received {} bytes");
+                            println!("anidb received {} bytes", len);
                             match std::str::from_utf8(&buf[..buf_len]) {
                                 Ok(data) => {
                                     let mut data_iter = data.splitn(2, " ");
